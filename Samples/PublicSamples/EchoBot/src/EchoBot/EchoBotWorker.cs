@@ -19,6 +19,7 @@ namespace EchoBot
         {
             try
             {
+                _logger.LogDebug("before startAsync");
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     await _botHost.StartAsync();

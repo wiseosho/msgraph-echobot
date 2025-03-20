@@ -15,7 +15,7 @@ namespace EchoBot
         /// Gets or sets the certificate thumbprint.
         /// </summary>
         /// <value>The certificate thumbprint.</value>
-        [Required]
+        /// [Required]
         public string CertificateThumbprint { get; set; }
 
         /// <summary>
@@ -25,6 +25,19 @@ namespace EchoBot
         [Required]
         public string AadAppId { get; set; }
 
+        /// <summary>
+        /// Gets or sets the aad application secret.
+        /// </summary>
+        /// <value>The aad application secret.</value>
+        [Required]
+        public string AadAppTenantId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the aad application secret.
+        /// </summary>
+        /// <value>The aad application secret.</value>
+        [Required]
+        public string TesterEmail { get; set; }
         /// <summary>
         /// Gets or sets the aad application secret.
         /// </summary>

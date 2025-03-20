@@ -17,11 +17,40 @@ using EchoBot.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using System.Net;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Logging;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
+
+public class LogRequestFilter : IAsyncActionFilter
+{
+    private readonly ILogger<LogRequestFilter> _logger;
+
+    public LogRequestFilter(ILogger<LogRequestFilter> logger)
+    {
+        _logger = logger;
+    }
+
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var request = context.HttpContext.Request;
+        request.EnableBuffering();
+        using var reader = new StreamReader(request.Body, Encoding.UTF8, leaveOpen: true);
+        var rawRequest = await reader.ReadToEndAsync();
+        _logger.LogInformation($"📥 Incoming Request:\n{rawRequest}");
+        request.Body.Position = 0;
+
+        await next(); // Proceed with action execution
+    }
+}
 
 namespace EchoBot.Controllers
 {
-    [ApiController]
     [Route("[controller]")]
+    [ApiController]
+    [ServiceFilter(typeof(LogRequestFilter))]
     public class CallsController : ControllerBase
     {
         private readonly ILogger<CallsController> _logger;
@@ -42,13 +71,19 @@ namespace EchoBot.Controllers
         /// </summary>
         /// <param name="joinCallBody">The join call body.</param>
         /// <returns>The <see cref="HttpResponseMessage" />.</returns>
+        [ServiceFilter(typeof(LogRequestFilter))]
         [HttpPost]
         public async Task<IActionResult> JoinCallAsync([FromBody] JoinCallBody joinCallBody)
         {
             try
             {
+                _logger.LogInformation("joinCallBody");
                 _logger.LogInformation("JOIN CALL");
                 var call = await _botService.JoinCallAsync(joinCallBody).ConfigureAwait(false);
+                //if (call.Resource.MediaConfiguration == null || call.Resource.MediaConfiguration.MediaStreams.Count == 0)
+                //{
+                //    Console.WriteLine("⚠️ No media endpoints received!");
+                //}
 
                 var values = new
                 {

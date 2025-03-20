@@ -133,6 +133,7 @@ namespace EchoBot.Bot
                 MediaPlatformLogger = _mediaPlatformLogger
             };
 
+            _logger.LogInformation("Setting NotificationUrl");
             var notificationUrl = new Uri($"https://{_settings.ServiceDnsName}:{_settings.BotInstanceExternalPort}/{HttpRouteConstants.CallSignalingRoutePrefix}/{HttpRouteConstants.OnNotificationRequestRoute}");
             _logger.LogInformation($"NotificationUrl: ${notificationUrl}");
 
@@ -189,6 +190,7 @@ namespace EchoBot.Bot
         /// <returns>The <see cref="ICall" /> that was requested to join.</returns>
         public async Task<ICall> JoinCallAsync(JoinCallBody joinCallBody)
         {
+            _logger.LogInformation("JoinCallAsync Entered.");
             // A tracking id for logging purposes. Helps identify this call in logs.
             var scenarioId = Guid.NewGuid();
 
@@ -220,6 +222,17 @@ namespace EchoBot.Bot
                 var statefulCall = await this.Client.Calls().AddAsync(joinParams, scenarioId).ConfigureAwait(false);
                 statefulCall.GraphLogger.Info($"Call creation complete: {statefulCall.Id}");
                 _logger.LogInformation($"Call creation complete: {statefulCall.Id}");
+
+                var mediaSessionEst = statefulCall.GetLocalMediaSession();
+                //if (mediaSessionEst?.MediaConfiguration == null || mediaSession.MediaConfiguration.MediaStreams.Count == 0)
+                //{
+                //    _logger.LogWarning("⚠️ No media endpoints assigned to the bot.");
+                //}
+                //else
+                //{
+                //    _logger.LogInformation($"✅ Media Configuration Retrieved: {mediaSession.MediaConfiguration.MediaStreams.Count} streams available.");
+                //}
+
                 return statefulCall;
             }
 

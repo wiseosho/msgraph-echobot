@@ -16,7 +16,15 @@ using EchoBot.Bot;
 using EchoBot.Util;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.Bot.Schema;  // ✅ Fix: Add this namespace
+using Microsoft.Bot.Builder;
+using Microsoft.Bot.Builder.Integration.AspNet.Core;  
 using Microsoft.Graph.Communications.Common.Telemetry;
+using EchoBot.Authentication;
+//using EchoBot.AdapterWithErrorHandler;
+using Microsoft.Extensions.Options;
+using Microsoft.Bot.Builder.Teams;
+using Microsoft.Bot.Connector.Authentication;
 
 namespace EchoBot
 {
@@ -43,7 +51,7 @@ namespace EchoBot
         /// <returns></returns>
         public async Task StartAsync()
         {
-            _logger.LogInformation("Starting the Echo Bot");
+            //_logger.LogInformation("Starting the Echo Bot");
             // Set up the bot web application
             var builder = WebApplication.CreateBuilder();
 
@@ -72,14 +80,34 @@ namespace EchoBot
                 .ValidateDataAnnotations()
                 .ValidateOnStart();
 
+            builder.Services.AddSingleton<GraphAuthenticationProvider>(sp =>
+            {
+                var appSettings = sp.GetRequiredService<IOptions<AppSettings>>().Value;
+                return new GraphAuthenticationProvider(
+                    appSettings.AadAppId,
+                    appSettings.AadAppSecret,
+                    appSettings.AadAppTenantId
+                );
+            });
+
+            builder.Services.AddSingleton<LogRequestFilter>();
+            builder.Services.AddSingleton<IBot, SimpleBot>();
+            builder.Services.AddSingleton<IBotFrameworkHttpAdapter, AdapterWithErrorHandler>(sp =>
+            {
+                var configuration = sp.GetRequiredService<IConfiguration>();
+                var logger = sp.GetRequiredService<ILogger<IBotFrameworkHttpAdapter>>();
+                return new AdapterWithErrorHandler(configuration, logger);
+            });
             builder.Services.AddSingleton<IGraphLogger, GraphLogger>(_ => new GraphLogger("EchoBotWorker", redirectToTrace: true));
             builder.Services.AddSingleton<IBotMediaLogger, BotMediaLogger>();
             builder.Logging.AddApplicationInsights();
             builder.Logging.SetMinimumLevel(LogLevel.Information);
 
-            builder.Logging.AddEventLog(config => config.SourceName = "Echo Bot Service");
+            //builder.Logging.AddEventLog(config => config.SourceName = "Echo Bot Service");
 
             builder.Services.AddSingleton<IBotService, BotService>();
+            builder.Services.AddSingleton<IChatBotService, ChatBotService>();
+            builder.Services.AddSingleton<IBot, ChatBotService>();
 
             // Bot Settings Setup
             var botInternalHostingProtocol = "https";
@@ -137,6 +165,16 @@ namespace EchoBot
                 bot.Initialize();
             }
 
+            using (var scope = _app.Services.CreateScope())
+            {
+                var chatbot = scope.ServiceProvider.GetRequiredService<IChatBotService>();
+                chatbot.Initialize();
+
+                // Send a message to the tester
+                // var appSettings = scope.ServiceProvider.GetRequiredService<IOptions<AppSettings>>().Value;
+                //await chatbot.PostMessageToUserAsync(appSettings.TesterEmail, "Hello! The bot service is up and running.");
+            }
+
             // Configure the HTTP request pipeline.
             if (_app.Environment.IsDevelopment())
             {
@@ -172,4 +210,61 @@ namespace EchoBot
             }
         }
     }
+
+    // ✅ Minimal bot that only responds to messages
+    public class SimpleBot : TeamsActivityHandler
+    {
+        private readonly string _appId;
+        private readonly string _appPassword;
+        private readonly GraphAuthenticationProvider _authProvider;
+
+        public SimpleBot(IOptions<AppSettings> appSettings)
+        {
+            // Retrieve AadAppId and AadAppSecret from AppSettings
+            var settings = appSettings.Value;
+            _appId = settings.AadAppId;
+            _appPassword = settings.AadAppSecret;
+
+            // Initialize GraphAuthenticationProvider using AppSettings
+            _authProvider = new GraphAuthenticationProvider(
+                settings.AadAppId,
+                settings.AadAppSecret,
+                settings.AadAppTenantId
+            );
+        }
+
+        protected override async Task OnMessageActivityAsync(ITurnContext<IMessageActivity> turnContext, CancellationToken cancellationToken)
+        {
+            string userMessage = turnContext.Activity.Text ?? "unknown";
+            string botReply = $"You said: {userMessage}";
+
+            // Example: Use the GraphAuthenticationProvider to get an access token
+            var token = await _authProvider.GetAccessTokenAsync(new[] { "https://graph.microsoft.com/.default" });
+
+            // Log the token for debugging (optional)
+            //_logger.LogInformation($"Access Token: {token}");
+
+            // Create a reply activity
+            var replyActivity = MessageFactory.Text(botReply);
+
+            // Add the token as a custom header (if needed)
+            replyActivity.ChannelData = new
+            {
+                headers = new
+                {
+                    Authorization = $"Bearer {token}"
+                }
+            };
+
+            // Send the reply activity
+            await turnContext.SendActivityAsync(replyActivity, cancellationToken);
+        }
+
+        // Example: Use _appId and _appPassword for MicrosoftAppCredentials
+        private MicrosoftAppCredentials GetAppCredentials()
+        {
+            return new MicrosoftAppCredentials(_appId, _appPassword);
+        }
+    }
 }
+

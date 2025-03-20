@@ -243,4 +243,32 @@ namespace EchoBot.Authentication
             }
         }
     }
+
+    /// <summary>
+    /// Provides authentication for Microsoft Graph API.
+    /// </summary>
+    public class GraphAuthenticationProvider
+    {
+        private readonly IConfidentialClientApplication _clientApp;
+
+        public GraphAuthenticationProvider(string clientId, string clientSecret, string tenantId)
+        {
+            _clientApp = ConfidentialClientApplicationBuilder
+                .Create(clientId)
+                .WithClientSecret(clientSecret)
+                .WithAuthority($"https://login.microsoftonline.com/{tenantId}")
+                .Build();
+        }
+
+        /// <summary>
+        /// Gets an access token for the specified scopes.
+        /// </summary>
+        /// <param name="scopes">The scopes required for the token.</param>
+        /// <returns>The access token as a string.</returns>
+        public async Task<string> GetAccessTokenAsync(string[] scopes)
+        {
+            var result = await _clientApp.AcquireTokenForClient(scopes).ExecuteAsync();
+            return result.AccessToken;
+        }
+    }
 }
