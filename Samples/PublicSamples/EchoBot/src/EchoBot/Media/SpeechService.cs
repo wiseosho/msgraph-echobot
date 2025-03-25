@@ -53,7 +53,7 @@ namespace EchoBot.Media
         /// </summary>
         /// <param name="audioBuffer"></param>
         /// <param name="speakerName"></param>
-        public async Task AppendAudioBuffer(UnmixedAudioBuffer audioBuffer, string speakerName)
+        public async Task AppendUnmixedAudioBuffer(UnmixedAudioBuffer audioBuffer, string speakerName)
         {
             if (!_isRunning)
             {
@@ -74,12 +74,45 @@ namespace EchoBot.Media
                     Marshal.Copy(audioBuffer.Data, buffer, 0, (int)bufferLength);
 
                     // Check for silence
-                    if (IsSilence(buffer))
-                    {
-                        _logger.LogInformation("Silence detected. Skipping buffer.");
-                        return;
-                    }
+                    //if (IsSilence(buffer))
+                    //{
+                    //    _logger.LogInformation("Silence detected. Skipping buffer.");
+                    //    return;
+                    //}
 
+                    _audioInputStream.Write(buffer);
+                }
+            }
+            catch (Exception e)
+            {
+                _logger.LogError(e, "Exception occurred while writing to input stream.");
+            }
+        }
+
+        /// <summary>
+        /// Appends the audio buffer.
+        /// </summary>
+        /// <param name="audioBuffer"></param>
+        /// <param name="speakerName"></param>
+        public async Task AppendAudioBuffer(AudioMediaBuffer audioBuffer, string speakerName)
+        {
+            if (!_isRunning)
+            {
+                Start();
+
+                // Broadcast SpeakerStarted event
+                _signalRService.BroadcastSpeakerStarted(speakerName, DateTime.UtcNow);
+
+                await ProcessSpeech(speakerName);
+            }
+
+            try
+            {
+                var bufferLength = audioBuffer.Length;
+                if (bufferLength > 0)
+                {
+                    var buffer = new byte[bufferLength];
+                    Marshal.Copy(audioBuffer.Data, buffer, 0, (int)bufferLength);
                     _audioInputStream.Write(buffer);
                 }
             }
@@ -260,7 +293,7 @@ namespace EchoBot.Media
             }
 
             var rms = Math.Sqrt(sum / audioBuffer.Length);
-            _logger.LogInformation($"RMS: {rms}");
+            //_logger.LogInformation($"RMS: {rms}");
             return rms < threshold; // Return true if the audio is below the silence threshold
         }
     }

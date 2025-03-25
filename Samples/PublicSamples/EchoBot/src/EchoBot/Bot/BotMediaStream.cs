@@ -210,40 +210,10 @@ namespace EchoBot.Bot
         /// <param name="e">The audio media received arguments.</param>
         private async void OnAudioMediaReceived(object? sender, AudioMediaReceivedEventArgs e)
         {
-            if (e.Buffer == null)
+            if (e.Buffer.UnmixedAudioBuffers == null)
             {
-                _logger.LogWarning("AudioMediaReceivedEventArgs.Buffer is null. Skipping processing.");
-                return;
-            }
-
-            // Check if UnmixedAudioBuffers is null or empty
-            if (e.Buffer.UnmixedAudioBuffers == null || !e.Buffer.UnmixedAudioBuffers.Any())
-            {
-                _logger.LogWarning("UnmixedAudioBuffers is null or empty. Unable to determine the speakers.");
-                return;
-            }
-
-            // Process each UnmixedAudioBuffer concurrently
-            var tasks = e.Buffer.UnmixedAudioBuffers.Select(async unmixedAudioBuffer =>
-            {
-                if (unmixedAudioBuffer.Equals(default(UnmixedAudioBuffer)))
-                {
-                    _logger.LogWarning("UnmixedAudioBuffer is default. Skipping this buffer.");
-                    return;
-                }
-
-                // Retrieve the ActiveSpeakerId from the UnmixedAudioBuffer
-                var activeSpeakerId = unmixedAudioBuffer.ActiveSpeakerId;
-
-                if (activeSpeakerId == null)
-                {
-                    _logger.LogWarning("ActiveSpeakerId is null. Skipping this buffer.");
-                    return;
-                }
-
-                // Map ActiveSpeakerId to the speaker name using CallHandler
-                //var speakerName = _callHandler.GetSpeakerName(activeSpeakerId.ToString());
-                var speakerName = activeSpeakerId.ToString();
+                // Handle mixed audio buffer
+                _logger.LogTrace($"Received Audio: [AudioMediaReceivedEventArgs(Data=<{e.Buffer.Data.ToString()}>, Length={e.Buffer.Length}, Timestamp={e.Buffer.Timestamp})]");
 
                 try
                 {
@@ -251,33 +221,91 @@ namespace EchoBot.Bot
 
                     if (_languageService != null)
                     {
-                        // Pass the speaker name and buffer to the SpeechService
-                        await _languageService.AppendAudioBuffer(unmixedAudioBuffer, speakerName);
+                        // Pass the mixed buffer to the SpeechService with a default speaker name
+                        await _languageService.AppendAudioBuffer(e.Buffer, "Utterance");
                     }
                     else
                     {
                         // Handle audio loopback if SpeechService is not enabled
-                        var length = unmixedAudioBuffer.Length;
+                        var length = e.Buffer.Length;
                         if (length > 0)
                         {
                             var buffer = new byte[length];
-                            Marshal.Copy(unmixedAudioBuffer.Data, buffer, 0, (int)length);
+                            Marshal.Copy(e.Buffer.Data, buffer, 0, (int)length);
 
                             var currentTick = DateTime.Now.Ticks;
                             this.audioMediaBuffers = Util.Utilities.CreateAudioMediaBuffers(buffer, currentTick, _logger);
                             await this.audioVideoFramePlayer.EnqueueBuffersAsync(this.audioMediaBuffers, new List<VideoMediaBuffer>());
                         }
                     }
+
+                    // Dispose of the mixed buffer after processing
+                    e.Buffer.Dispose();
                 }
                 catch (Exception ex)
                 {
                     this.GraphLogger.Error(ex);
-                    _logger.LogError(ex, "Error processing UnmixedAudioBuffer.");
+                    _logger.LogError(ex, "OnAudioMediaReceived error while processing mixed audio.");
                 }
-            });
+            }
+            else
+            {
+                // Handle unmixed audio buffer
+                // _logger.LogWarning("AudioMediaReceivedEventArgs.Buffer is null. Treating as unmixed audio.");
+                try
+                {
+                    // Process each UnmixedAudioBuffer concurrently
+                    var tasks = e.Buffer.UnmixedAudioBuffers.Select(async unmixedAudioBuffer =>
+                    {
+                        if (unmixedAudioBuffer.Equals(default(UnmixedAudioBuffer)))
+                        {
+                            _logger.LogWarning("UnmixedAudioBuffer is default. Skipping this buffer.");
+                            return;
+                        }
 
-            // Wait for all tasks to complete
-            await Task.WhenAll(tasks);
+                        var activeSpeakerId = unmixedAudioBuffer.ActiveSpeakerId;
+                        var speakerName = activeSpeakerId != 0 ? activeSpeakerId.ToString() : "UnknownSpeaker";
+
+                        try
+                        {
+                            if (!startVideoPlayerCompleted.Task.IsCompleted) { return; }
+
+                            if (_languageService != null)
+                            {
+                                // Pass the speaker name and buffer to the SpeechService
+                                await _languageService.AppendUnmixedAudioBuffer(unmixedAudioBuffer, speakerName);
+                            }
+                            else
+                            {
+                                // Handle audio loopback if SpeechService is not enabled
+                                var length = unmixedAudioBuffer.Length;
+                                if (length > 0)
+                                {
+                                    var buffer = new byte[length];
+                                    Marshal.Copy(unmixedAudioBuffer.Data, buffer, 0, (int)length);
+
+                                    var currentTick = DateTime.Now.Ticks;
+                                    this.audioMediaBuffers = Util.Utilities.CreateAudioMediaBuffers(buffer, currentTick, _logger);
+                                    await this.audioVideoFramePlayer.EnqueueBuffersAsync(this.audioMediaBuffers, new List<VideoMediaBuffer>());
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            this.GraphLogger.Error(ex);
+                            _logger.LogError(ex, "Error processing UnmixedAudioBuffer.");
+                        }
+                    });
+
+                    // Wait for all tasks to complete
+                    await Task.WhenAll(tasks);
+                }
+                catch (Exception ex)
+                {
+                    this.GraphLogger.Error(ex);
+                    _logger.LogError(ex, "Error processing unmixed audio.");
+                }
+            }
         }
 
         private void OnSendMediaBuffer(object? sender, Media.MediaStreamEventArgs e)

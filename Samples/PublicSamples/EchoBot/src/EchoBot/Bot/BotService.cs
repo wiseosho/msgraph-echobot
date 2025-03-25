@@ -198,13 +198,12 @@ namespace EchoBot.Bot
         public async Task<ICall> JoinCallAsync(JoinCallBody joinCallBody)
         {
             _logger.LogInformation("JoinCallAsync Entered.");
-            // A tracking id for logging purposes. Helps identify this call in logs.
             var scenarioId = Guid.NewGuid();
-
             var (chatInfo, meetingInfo) = JoinInfo.ParseJoinURL(joinCallBody.JoinUrl);
-
             var tenantId = (meetingInfo as OrganizerMeetingInfo).Organizer.GetPrimaryIdentity().GetTenantId();
-            var mediaSession = this.CreateLocalMediaSession();
+
+            // Pass the ReceiveUnmixedAudio flag to CreateLocalMediaSession
+            var mediaSession = this.CreateLocalMediaSession(joinCallBody.ReceiveUnmixedAudio);
 
             var joinParams = new JoinMeetingParameters(chatInfo, meetingInfo, mediaSession)
             {
@@ -213,10 +212,6 @@ namespace EchoBot.Bot
 
             if (!string.IsNullOrWhiteSpace(joinCallBody.DisplayName))
             {
-                // Teams client does not allow changing of ones own display name.
-                // If display name is specified, we join as anonymous (guest) user
-                // with the specified display name.  This will put bot into lobby
-                // unless lobby bypass is disabled.
                 joinParams.GuestIdentity = new Identity
                 {
                     Id = Guid.NewGuid().ToString(),
@@ -227,19 +222,7 @@ namespace EchoBot.Bot
             if (!this.CallHandlers.TryGetValue(joinParams.ChatInfo.ThreadId, out CallHandler? call))
             {
                 var statefulCall = await this.Client.Calls().AddAsync(joinParams, scenarioId).ConfigureAwait(false);
-                statefulCall.GraphLogger.Info($"Call creation complete: {statefulCall.Id}");
                 _logger.LogInformation($"Call creation complete: {statefulCall.Id}");
-
-                var mediaSessionEst = statefulCall.GetLocalMediaSession();
-                //if (mediaSessionEst?.MediaConfiguration == null || mediaSession.MediaConfiguration.MediaStreams.Count == 0)
-                //{
-                //    _logger.LogWarning("⚠️ No media endpoints assigned to the bot.");
-                //}
-                //else
-                //{
-                //    _logger.LogInformation($"✅ Media Configuration Retrieved: {mediaSession.MediaConfiguration.MediaStreams.Count} streams available.");
-                //}
-
                 return statefulCall;
             }
 
@@ -249,24 +232,24 @@ namespace EchoBot.Bot
         /// <summary>
         /// Creates the local media session.
         /// </summary>
+        /// <param name="receiveUnmixedAudio">Flag to receive unmixed audio.</param>
         /// <param name="mediaSessionId">The media session identifier.
         /// This should be a unique value for each call.</param>
         /// <returns>The <see cref="ILocalMediaSession" />.</returns>
-        private ILocalMediaSession CreateLocalMediaSession(Guid mediaSessionId = default)
+        private ILocalMediaSession CreateLocalMediaSession(bool receiveUnmixedAudio, Guid mediaSessionId = default)
         {
             try
             {
-                // Create media session object with corrected AudioSocketSettings
                 return this.Client.CreateMediaSession(
                     new AudioSocketSettings
                     {
-                        StreamDirections = StreamDirection.Sendrecv, // Allow sending and receiving audio
-                        SupportedAudioFormat = AudioFormat.Pcm16K,  // Use 16kHz PCM audio format
-                        ReceiveUnmixedMeetingAudio = true           // Enable receiving unmixed audio buffers
+                        StreamDirections = StreamDirection.Sendrecv,
+                        SupportedAudioFormat = AudioFormat.Pcm16K,
+                        ReceiveUnmixedMeetingAudio = receiveUnmixedAudio // Dynamically set
                     },
                     new VideoSocketSettings
                     {
-                        StreamDirections = StreamDirection.Inactive // Disable video streaming
+                        StreamDirections = StreamDirection.Inactive
                     },
                     mediaSessionId: mediaSessionId);
             }

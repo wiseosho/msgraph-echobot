@@ -35,6 +35,12 @@ namespace EchoBot.Models
         /// </summary>
         /// <value>The display name.</value>
         public string? DisplayName { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether to receive unmixed audio.
+        /// </summary>
+        /// <value><c>true</c> if receive unmixed audio; otherwise, <c>false</c>.</value>
+        public bool ReceiveUnmixedAudio { get; set; } =true ;// New property
     }
 }
 
