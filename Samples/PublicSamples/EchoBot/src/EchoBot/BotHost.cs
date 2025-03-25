@@ -14,6 +14,7 @@
 using DotNetEnv.Configuration;
 using EchoBot.Bot;
 using EchoBot.Util;
+using EchoBot.SignalR;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Bot.Schema;  // ✅ Fix: Add this namespace
@@ -109,6 +110,20 @@ namespace EchoBot
             builder.Services.AddSingleton<IChatBotService, ChatBotService>();
             builder.Services.AddSingleton<IBot, ChatBotService>();
 
+            builder.Services.AddSignalR(); // Add SignalR service
+            builder.Services.AddSingleton<ISignalRService, SignalRService>(); // Register SignalRService
+
+            builder.Services.AddCors(options =>
+            {
+                options.AddDefaultPolicy(policy =>
+                {
+                    policy.AllowAnyHeader()
+                          .AllowAnyMethod()
+                          .AllowCredentials()
+                          .SetIsOriginAllowed(origin => true); // Allow all origins
+                });
+            });
+
             // Bot Settings Setup
             var botInternalHostingProtocol = "https";
             if (appSettings.UseLocalDevSettings)
@@ -185,7 +200,10 @@ namespace EchoBot
 
             _app.UseAuthorization();
 
+            _app.UseCors(); // Add this before mapping the SignalR hub
             _app.MapControllers();
+
+            _app.MapHub<TranscriptionHub>("/transcriptionHub"); // Map the SignalR hub
 
             await _app.RunAsync();
         }

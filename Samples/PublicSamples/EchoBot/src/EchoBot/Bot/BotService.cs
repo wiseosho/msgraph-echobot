@@ -28,6 +28,7 @@ using System.Net;
 using EchoBot.Util;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Contracts;
+using EchoBot.SignalR; // Ensure this namespace is included
 
 namespace EchoBot.Bot
 {
@@ -60,6 +61,8 @@ namespace EchoBot.Bot
         /// </summary>
         private readonly IBotMediaLogger _mediaPlatformLogger;
 
+        private readonly ISignalRService _signalRService; // Add this field
+
         /// <summary>
         /// Gets the collection of call handlers.
         /// </summary>
@@ -89,16 +92,20 @@ namespace EchoBot.Bot
         /// <param name="logger"></param>
         /// <param name="settings"></param>
         /// <param name="mediaLogger"></param>
+        /// <param name="signalRService"></param>
         public BotService(
             IGraphLogger graphLogger,
             ILogger<BotService> logger,
             IOptions<AppSettings> settings,
-            IBotMediaLogger mediaLogger)
+            IBotMediaLogger mediaLogger,
+            ISignalRService signalRService // Add this parameter
+        )
         {
             _graphLogger = graphLogger;
             _logger = logger;
             _settings = settings.Value;
             _mediaPlatformLogger = mediaLogger;
+            _signalRService = signalRService; // Assign the parameter
         }
 
         /// <summary>
@@ -249,24 +256,23 @@ namespace EchoBot.Bot
         {
             try
             {
-                // create media session object, this is needed to establish call connections
+                // Create media session object with corrected AudioSocketSettings
                 return this.Client.CreateMediaSession(
                     new AudioSocketSettings
                     {
-                        StreamDirections = StreamDirection.Sendrecv,
-                        // Note! Currently, the only audio format supported when receiving unmixed audio is Pcm16K
-                        SupportedAudioFormat = AudioFormat.Pcm16K,
-                        ReceiveUnmixedMeetingAudio = false //get the extra buffers for the speakers
+                        StreamDirections = StreamDirection.Sendrecv, // Allow sending and receiving audio
+                        SupportedAudioFormat = AudioFormat.Pcm16K,  // Use 16kHz PCM audio format
+                        ReceiveUnmixedMeetingAudio = true           // Enable receiving unmixed audio buffers
                     },
                     new VideoSocketSettings
                     {
-                        StreamDirections = StreamDirection.Inactive
+                        StreamDirections = StreamDirection.Inactive // Disable video streaming
                     },
                     mediaSessionId: mediaSessionId);
             }
             catch (Exception e)
             {
-                _logger.LogError(e.Message);
+                _logger.LogError($"Error creating media session: {e.Message}");
                 throw;
             }
         }
@@ -331,7 +337,8 @@ namespace EchoBot.Bot
         {
             foreach (var call in args.AddedResources)
             {
-                var callHandler = new CallHandler(call, _settings, _logger);
+                // Pass the ISignalRService to the CallHandler constructor
+                var callHandler = new CallHandler(call, _settings, _logger, _signalRService);
                 var threadId = call.Resource.ChatInfo.ThreadId;
                 this.CallHandlers[threadId] = callHandler;
             }
@@ -341,7 +348,8 @@ namespace EchoBot.Bot
                 var threadId = call.Resource.ChatInfo.ThreadId;
                 if (this.CallHandlers.TryRemove(threadId, out CallHandler? handler))
                 {
-                    Task.Run(async () => {
+                    Task.Run(async () =>
+                    {
                         await handler.BotMediaStream.ShutdownAsync();
                         handler.Dispose();
                     });

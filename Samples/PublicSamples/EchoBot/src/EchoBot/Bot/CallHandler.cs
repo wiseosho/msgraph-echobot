@@ -6,6 +6,7 @@ using Microsoft.Graph.Communications.Common.Telemetry;
 using Microsoft.Graph.Communications.Resources;
 using Microsoft.Graph.Models;
 using System.Timers;
+using EchoBot.SignalR; // Ensure this namespace is included
 
 namespace EchoBot.Bot
 {
@@ -14,6 +15,10 @@ namespace EchoBot.Bot
     /// </summary>
     public class CallHandler : HeartbeatHandler
     {
+        // Add this dictionary to store SocketId-to-SpeakerName mapping
+        private readonly Dictionary<string, string> _socketIdToSpeakerMap = new();
+        private readonly ILogger _logger; // Declare the logger field
+
         /// <summary>
         /// Gets the call.
         /// </summary>
@@ -31,19 +36,31 @@ namespace EchoBot.Bot
         /// </summary>
         /// <param name="statefulCall">The stateful call.</param>
         /// <param name="settings">The settings.</param>
-        /// <param name="logger"></param>
+        /// <param name="logger">The logger.</param>
+        /// <param name="signalRService">The SignalR service.</param>
         public CallHandler(
             ICall statefulCall,
             AppSettings settings,
-            ILogger logger
+            ILogger logger, // Pass the logger as a parameter
+            ISignalRService signalRService // Add this parameter
         )
             : base(TimeSpan.FromMinutes(10), statefulCall?.GraphLogger)
         {
+            _logger = logger; // Initialize the logger
             this.Call = statefulCall;
             this.Call.OnUpdated += this.CallOnUpdated;
             this.Call.Participants.OnUpdated += this.ParticipantsOnUpdated;
 
-            this.BotMediaStream = new BotMediaStream(this.Call.GetLocalMediaSession(), this.Call.Id, this.GraphLogger, logger, settings);
+            // Pass the current CallHandler instance (this) to BotMediaStream
+            this.BotMediaStream = new BotMediaStream(
+                this.Call.GetLocalMediaSession(),
+                this.Call.Id,
+                this.GraphLogger,
+                logger,
+                settings,
+                signalRService,
+                this // Pass the current CallHandler instance
+            );
         }
 
         /// <inheritdoc/>
@@ -152,6 +169,30 @@ namespace EchoBot.Bot
         /// <param name="args">Event args containing added and removed participants.</param>
         public void ParticipantsOnUpdated(IParticipantCollection sender, CollectionEventArgs<IParticipant> args)
         {
+            foreach (var participant in args.AddedResources)
+            {
+                var mediaStream = participant.Resource.MediaStreams.FirstOrDefault();
+                var sourceId = mediaStream?.SourceId; // Use SourceId instead of MediaStreamId
+                var displayName = participant.Resource.Info.Identity.User?.DisplayName ?? "UnknownSpeaker";
+
+                if (!string.IsNullOrEmpty(sourceId))
+                {
+                    _socketIdToSpeakerMap[sourceId] = displayName;
+                    _logger.LogInformation($"Mapped SourceId {sourceId} to Speaker {displayName}");
+                }
+            }
+
+            foreach (var participant in args.RemovedResources)
+            {
+                var mediaStream = participant.Resource.MediaStreams.FirstOrDefault();
+                var sourceId = mediaStream?.SourceId; // Use SourceId instead of MediaStreamId
+                if (!string.IsNullOrEmpty(sourceId) && _socketIdToSpeakerMap.ContainsKey(sourceId))
+                {
+                    _socketIdToSpeakerMap.Remove(sourceId);
+                    _logger.LogInformation($"Removed mapping for SourceId {sourceId}");
+                }
+            }
+
             updateParticipants(args.AddedResources);
             updateParticipants(args.RemovedResources, false);
         }
@@ -168,6 +209,12 @@ namespace EchoBot.Bot
                     return true;
 
             return false;
+        }
+
+        // Add a method to retrieve the speaker name by SocketId
+        public string GetSpeakerName(string socketId)
+        {
+            return _socketIdToSpeakerMap.TryGetValue(socketId, out var speakerName) ? speakerName : "UnknownSpeaker";
         }
     }
 }

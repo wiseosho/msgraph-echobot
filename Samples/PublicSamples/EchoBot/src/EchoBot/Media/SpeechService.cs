@@ -1,4 +1,5 @@
-﻿using Microsoft.CognitiveServices.Speech;
+﻿using EchoBot.SignalR;
+using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
 using Microsoft.Skype.Bots.Media;
 using System.Runtime.InteropServices;
@@ -29,11 +30,14 @@ namespace EchoBot.Media
         private readonly SpeechConfig _speechConfig;
         private SpeechRecognizer _recognizer;
         private readonly SpeechSynthesizer _synthesizer;
+        private readonly ISignalRService _signalRService;
+
         /// <summary>
         /// Initializes a new instance of the <see cref="SpeechService" /> class.
-        public SpeechService(AppSettings settings, ILogger logger)
+        public SpeechService(AppSettings settings, ILogger logger, ISignalRService signalRService)
         {
             _logger = logger;
+            _signalRService = signalRService;
 
             _speechConfig = SpeechConfig.FromSubscription(settings.SpeechConfigKey, settings.SpeechConfigRegion);
             _speechConfig.SpeechSynthesisLanguage = settings.BotLanguage;
@@ -48,29 +52,40 @@ namespace EchoBot.Media
         /// Appends the audio buffer.
         /// </summary>
         /// <param name="audioBuffer"></param>
-        public async Task AppendAudioBuffer(AudioMediaBuffer audioBuffer)
+        /// <param name="speakerName"></param>
+        public async Task AppendAudioBuffer(UnmixedAudioBuffer audioBuffer, string speakerName)
         {
             if (!_isRunning)
             {
                 Start();
-                await ProcessSpeech();
+
+                // Broadcast SpeakerStarted event
+                _signalRService.BroadcastSpeakerStarted(speakerName, DateTime.UtcNow);
+
+                await ProcessSpeech(speakerName);
             }
 
             try
             {
-                // audio for a 1:1 call
                 var bufferLength = audioBuffer.Length;
                 if (bufferLength > 0)
                 {
                     var buffer = new byte[bufferLength];
                     Marshal.Copy(audioBuffer.Data, buffer, 0, (int)bufferLength);
 
+                    // Check for silence
+                    if (IsSilence(buffer))
+                    {
+                        _logger.LogInformation("Silence detected. Skipping buffer.");
+                        return;
+                    }
+
                     _audioInputStream.Write(buffer);
                 }
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "Exception happend writing to input stream");
+                _logger.LogError(e, "Exception occurred while writing to input stream.");
             }
         }
 
@@ -97,6 +112,9 @@ namespace EchoBot.Media
 
             if (_isRunning)
             {
+                // Example: broadcast speaker finished
+                _signalRService.BroadcastSpeakerFinished("UnknownSpeaker", DateTime.UtcNow);
+
                 await _recognizer.StopContinuousRecognitionAsync();
                 _recognizer.Dispose();
                 _audioInputStream.Close();
@@ -123,7 +141,7 @@ namespace EchoBot.Media
         /// <summary>
         /// Processes this instance.
         /// </summary>
-        private async Task ProcessSpeech()
+        private async Task ProcessSpeech(string speakerName)
         {
             try
             {
@@ -138,10 +156,13 @@ namespace EchoBot.Media
                     }
                 }
 
-                _recognizer.Recognizing += (s, e) =>
-                {
-                    _logger.LogInformation($"RECOGNIZING: Text={e.Result.Text}");
-                };
+                //_recognizer.Recognizing += (s, e) =>
+                //{
+                //    if (!string.IsNullOrEmpty(e.Result.Text))
+                //    {
+                //        _signalRService.BroadcastTranscription(speakerName, e.Result.Text, DateTime.UtcNow);
+                //    }
+                //};
 
                 _recognizer.Recognized += async (s, e) =>
                 {
@@ -153,7 +174,8 @@ namespace EchoBot.Media
                         _logger.LogInformation($"RECOGNIZED: Text={e.Result.Text}");
                         // We recognized the speech
                         // Now do Speech to Text
-                        await TextToSpeech(e.Result.Text);
+                        //await TextToSpeech(e.Result.Text);
+                        _signalRService.BroadcastTranscription(speakerName, e.Result.Text, DateTime.UtcNow);
                     }
                     else if (e.Result.Reason == ResultReason.NoMatch)
                     {
@@ -227,6 +249,19 @@ namespace EchoBot.Media
                 };
                 OnSendMediaBufferEventArgs(this, args);
             }
+        }
+
+        private bool IsSilence(byte[] audioBuffer, int threshold = 200)
+        {
+            long sum = 0;
+            foreach (var sample in audioBuffer)
+            {
+                sum += sample * sample;
+            }
+
+            var rms = Math.Sqrt(sum / audioBuffer.Length);
+            _logger.LogInformation($"RMS: {rms}");
+            return rms < threshold; // Return true if the audio is below the silence threshold
         }
     }
 }
