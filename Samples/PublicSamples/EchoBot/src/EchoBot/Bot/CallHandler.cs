@@ -18,6 +18,7 @@ namespace EchoBot.Bot
         // Add this dictionary to store SocketId-to-SpeakerName mapping
         private readonly Dictionary<string, string> _socketIdToSpeakerMap = new();
         private readonly ILogger _logger; // Declare the logger field
+        private readonly bool _receiveUnmixedAudio; // Field to store the setting
 
         /// <summary>
         /// Gets the call.
@@ -42,7 +43,8 @@ namespace EchoBot.Bot
             ICall statefulCall,
             AppSettings settings,
             ILogger logger, // Pass the logger as a parameter
-            ISignalRService signalRService // Add this parameter
+            ISignalRService signalRService, // Add this parameter
+            bool receiveUnmixedAudio // Add this parameter
         )
             : base(TimeSpan.FromMinutes(10), statefulCall?.GraphLogger)
         {
@@ -50,6 +52,8 @@ namespace EchoBot.Bot
             this.Call = statefulCall;
             this.Call.OnUpdated += this.CallOnUpdated;
             this.Call.Participants.OnUpdated += this.ParticipantsOnUpdated;
+
+            _receiveUnmixedAudio = receiveUnmixedAudio; // Assign the parameter to the field
 
             // Pass the current CallHandler instance (this) to BotMediaStream
             this.BotMediaStream = new BotMediaStream(
@@ -59,7 +63,8 @@ namespace EchoBot.Bot
                 logger,
                 settings,
                 signalRService,
-                this // Pass the current CallHandler instance
+                this, // Pass the current CallHandler instance
+                _receiveUnmixedAudio // Add this parameter
             );
         }
 

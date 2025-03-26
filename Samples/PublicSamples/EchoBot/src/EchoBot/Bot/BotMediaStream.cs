@@ -54,7 +54,7 @@ namespace EchoBot.Bot
         private readonly SpeechService _languageService;
         private readonly ISignalRService _signalRService;
         private readonly CallHandler _callHandler;
-
+        private readonly bool _receiveUnmixedAudio; // Field to store the setting
         /// <summary>
         /// Initializes a new instance of the <see cref="BotMediaStream" /> class.
         /// </summary>
@@ -65,6 +65,7 @@ namespace EchoBot.Bot
         /// <param name="settings">Azure settings</param>
         /// <param name="signalRService">SignalR service</param>
         /// <param name="callHandler">Call handler</param>
+        /// <param name="receiveUnmixedAudio">Receive unmixed audio setting</param>
         /// <exception cref="InvalidOperationException">A mediaSession needs to have at least an audioSocket</exception>
         public BotMediaStream(
             ILocalMediaSession mediaSession,
@@ -73,19 +74,21 @@ namespace EchoBot.Bot
             ILogger logger,
             AppSettings settings,
             ISignalRService signalRService,
-            CallHandler callHandler // Add CallHandler as a parameter
+            CallHandler callHandler,
+            bool receiveUnmixedAudio // Add this parameter
         )
             : base(graphLogger)
         {
             ArgumentVerifier.ThrowOnNullArgument(mediaSession, nameof(mediaSession));
             ArgumentVerifier.ThrowOnNullArgument(logger, nameof(logger));
             ArgumentVerifier.ThrowOnNullArgument(settings, nameof(settings));
-            ArgumentVerifier.ThrowOnNullArgument(signalRService, nameof(signalRService)); // Verify the parameter
+            ArgumentVerifier.ThrowOnNullArgument(signalRService, nameof(signalRService));
 
             _settings = settings;
             _logger = logger;
-            _signalRService = signalRService; // Assign the parameter
-            _callHandler = callHandler; // Initialize CallHandler
+            _signalRService = signalRService;
+            _callHandler = callHandler;
+            _receiveUnmixedAudio = receiveUnmixedAudio; // Store the setting
 
             this.participants = new List<IParticipant>();
 
@@ -210,51 +213,11 @@ namespace EchoBot.Bot
         /// <param name="e">The audio media received arguments.</param>
         private async void OnAudioMediaReceived(object? sender, AudioMediaReceivedEventArgs e)
         {
-            if (e.Buffer.UnmixedAudioBuffers == null)
-            {
-                // Handle mixed audio buffer
-                _logger.LogTrace($"Received Audio: [AudioMediaReceivedEventArgs(Data=<{e.Buffer.Data.ToString()}>, Length={e.Buffer.Length}, Timestamp={e.Buffer.Timestamp})]");
-
-                try
-                {
-                    if (!startVideoPlayerCompleted.Task.IsCompleted) { return; }
-
-                    if (_languageService != null)
-                    {
-                        // Pass the mixed buffer to the SpeechService with a default speaker name
-                        await _languageService.AppendAudioBuffer(e.Buffer, "Utterance");
-                    }
-                    else
-                    {
-                        // Handle audio loopback if SpeechService is not enabled
-                        var length = e.Buffer.Length;
-                        if (length > 0)
-                        {
-                            var buffer = new byte[length];
-                            Marshal.Copy(e.Buffer.Data, buffer, 0, (int)length);
-
-                            var currentTick = DateTime.Now.Ticks;
-                            this.audioMediaBuffers = Util.Utilities.CreateAudioMediaBuffers(buffer, currentTick, _logger);
-                            await this.audioVideoFramePlayer.EnqueueBuffersAsync(this.audioMediaBuffers, new List<VideoMediaBuffer>());
-                        }
-                    }
-
-                    // Dispose of the mixed buffer after processing
-                    e.Buffer.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    this.GraphLogger.Error(ex);
-                    _logger.LogError(ex, "OnAudioMediaReceived error while processing mixed audio.");
-                }
-            }
-            else
+            if (_receiveUnmixedAudio && e.Buffer.UnmixedAudioBuffers != null)
             {
                 // Handle unmixed audio buffer
-                // _logger.LogWarning("AudioMediaReceivedEventArgs.Buffer is null. Treating as unmixed audio.");
                 try
                 {
-                    // Process each UnmixedAudioBuffer concurrently
                     var tasks = e.Buffer.UnmixedAudioBuffers.Select(async unmixedAudioBuffer =>
                     {
                         if (unmixedAudioBuffer.Equals(default(UnmixedAudioBuffer)))
@@ -304,6 +267,44 @@ namespace EchoBot.Bot
                 {
                     this.GraphLogger.Error(ex);
                     _logger.LogError(ex, "Error processing unmixed audio.");
+                }
+            }
+            else if (!_receiveUnmixedAudio)
+            {
+                // Handle mixed audio buffer
+                _logger.LogTrace($"Received Audio: [AudioMediaReceivedEventArgs(Data=<{e.Buffer.Data.ToString()}>, Length={e.Buffer.Length}, Timestamp={e.Buffer.Timestamp})]");
+
+                try
+                {
+                    if (!startVideoPlayerCompleted.Task.IsCompleted) { return; }
+
+                    if (_languageService != null)
+                    {
+                        // Pass the mixed buffer to the SpeechService with a default speaker name
+                        await _languageService.AppendAudioBuffer(e.Buffer, "Utterance");
+                    }
+                    else
+                    {
+                        // Handle audio loopback if SpeechService is not enabled
+                        var length = e.Buffer.Length;
+                        if (length > 0)
+                        {
+                            var buffer = new byte[length];
+                            Marshal.Copy(e.Buffer.Data, buffer, 0, (int)length);
+
+                            var currentTick = DateTime.Now.Ticks;
+                            this.audioMediaBuffers = Util.Utilities.CreateAudioMediaBuffers(buffer, currentTick, _logger);
+                            await this.audioVideoFramePlayer.EnqueueBuffersAsync(this.audioMediaBuffers, new List<VideoMediaBuffer>());
+                        }
+                    }
+
+                    // Dispose of the mixed buffer after processing
+                    e.Buffer.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    this.GraphLogger.Error(ex);
+                    _logger.LogError(ex, "OnAudioMediaReceived error while processing mixed audio.");
                 }
             }
         }

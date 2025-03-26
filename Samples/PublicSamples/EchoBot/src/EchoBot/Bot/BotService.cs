@@ -202,8 +202,11 @@ namespace EchoBot.Bot
             var (chatInfo, meetingInfo) = JoinInfo.ParseJoinURL(joinCallBody.JoinUrl);
             var tenantId = (meetingInfo as OrganizerMeetingInfo).Organizer.GetPrimaryIdentity().GetTenantId();
 
+            // Default ReceiveUnmixedAudio to true if not provided
+            bool receiveUnmixedAudio = joinCallBody.ReceiveUnmixedAudio;
+
             // Pass the ReceiveUnmixedAudio flag to CreateLocalMediaSession
-            var mediaSession = this.CreateLocalMediaSession(joinCallBody.ReceiveUnmixedAudio);
+            var mediaSession = this.CreateLocalMediaSession(receiveUnmixedAudio);
 
             var joinParams = new JoinMeetingParameters(chatInfo, meetingInfo, mediaSession)
             {
@@ -269,40 +272,12 @@ namespace EchoBot.Bot
         {
             args.AddedResources.ForEach(call =>
             {
-                // Get the policy recording parameters.
-
-                // The context associated with the incoming call.
-                IncomingContext incomingContext =
-                    call.Resource.IncomingContext;
-
-                // The RP participant.
-                string observedParticipantId =
-                    incomingContext.ObservedParticipantId;
-
-                // If the observed participant is a delegate.
-                IdentitySet onBehalfOfIdentity =
-                    incomingContext.OnBehalfOf;
-
-                // If a transfer occured, the transferor.
-                IdentitySet transferorIdentity =
-                    incomingContext.Transferor;
-
-                string countryCode = null;
-                EndpointType? endpointType = null;
-
-                // Note: this should always be true for CR calls.
-                if (incomingContext.ObservedParticipantId == incomingContext.SourceParticipantId)
-                {
-                    // The dynamic location of the RP.
-                    countryCode = call.Resource.Source.CountryCode;
-
-                    // The type of endpoint being used.
-                    endpointType = call.Resource.Source.EndpointType;
-                }
+                // Default ReceiveUnmixedAudio to true for incoming calls
+                bool receiveUnmixedAudio = true;
 
                 IMediaSession mediaSession = Guid.TryParse(call.Id, out Guid callId)
-                    ? this.CreateLocalMediaSession(callId)
-                    : this.CreateLocalMediaSession();
+                    ? this.CreateLocalMediaSession(receiveUnmixedAudio, callId)
+                    : this.CreateLocalMediaSession(receiveUnmixedAudio);
 
                 // Answer call
                 call?.AnswerAsync(mediaSession).ForgetAndLogExceptionAsync(
@@ -320,8 +295,11 @@ namespace EchoBot.Bot
         {
             foreach (var call in args.AddedResources)
             {
+
+                // Default ReceiveUnmixedAudio to true for added resources
+                bool receiveUnmixedAudio = true;
                 // Pass the ISignalRService to the CallHandler constructor
-                var callHandler = new CallHandler(call, _settings, _logger, _signalRService);
+                var callHandler = new CallHandler(call, _settings, _logger, _signalRService, receiveUnmixedAudio);
                 var threadId = call.Resource.ChatInfo.ThreadId;
                 this.CallHandlers[threadId] = callHandler;
             }
